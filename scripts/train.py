@@ -7,7 +7,7 @@ import tensorboardX
 import sys
 
 import utils
-from model import ACModel
+from model import ACModel, OpLibModel
 
 
 # Parse arguments
@@ -110,15 +110,17 @@ except OSError:
 txt_logger.info("Training status loaded\n")
 
 # Load observations preprocessor
-
+# NOTE: assuming that all environments have the same observation space
 obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0].observation_space)
 if "vocab" in status:
     preprocess_obss.vocab.load_vocab(status["vocab"])
 txt_logger.info("Observations preprocessor loaded")
 
 # Load model
+# NOTE: assuming that all environments have the same action space
+acmodel = ACModel(obs_space, envs[0].action_space, args.mem, args.text) # this model is recurrent  
+# acmodel = OpLibModel(obs_space, envs[0].action_space)
 
-acmodel = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
 if "model_state" in status:
     acmodel.load_state_dict(status["model_state"])
 acmodel.to(device)
@@ -147,6 +149,10 @@ txt_logger.info("Optimizer loaded\n")
 num_frames = status["num_frames"]
 update = status["update"]
 start_time = time.time()
+
+
+# TODO: iterating through a sequence of different tasks, with symbols as input into models.
+# model dynamically chooses sequence of different modules (options) based on these symbols
 
 while num_frames < args.frames:
     # Update model parameters
@@ -177,7 +183,7 @@ while num_frames < args.frames:
         data += num_frames_per_episode.values()
         header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
         data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
-
+        
         txt_logger.info(
             "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
             .format(*data))
