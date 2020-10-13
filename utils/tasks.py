@@ -128,8 +128,23 @@ unlockcorrectdoor = Symbol('unlock_correct_door', description='TODO')
 to_room_with_goal = Symbol('to_room_with_goal', description='TODO')
 
 # Task 1: 4-room senvironment
-# TODO: adding more tasks -- as instructed in the writeout
-task1 = Task('4-room-environment', 'MiniGrid-FourRooms-v0',
-             SymbolSequence([to_room_with_goal, move2key]))
+# TODO: get the environment
+task1 = Task('to-room-with-goal', 'MiniGrid-FourRooms-v0',
+             SymbolSequence([to_room_with_goal]))
+task2 = Task('to-goal', 'MiniGrid-FourRooms-v0',
+             SymbolSequence([move2goal]))
+task3 = Task('4-room', 'MiniGrid-FourRooms-v0',
+             SymbolSequence([to_room_with_goal, move2goal]))
+task4 = Task('unlock', 'MiniGrid-Unlock-v0',
+             SymbolSequence([move2key, unlockcorrectdoor, to_room_with_goal, move2goal]))
+
 vocab = SymbVocabulary([move2goal, pickupgoal, move2key, unlockcorrectdoor, to_room_with_goal])
-global_taskset = TaskSet([task1], vocab)
+global_taskset = TaskSet([task1, task2, task3, task4], vocab)
+
+task5 = Task('door-key', 'MiniGrid-DoorKey-5x5-v0',
+             SymbolSequence([move2key, unlockcorrectdoor, to_room_with_goal, move2goal]))
+task6 = Task('simple-crossing', 'MiniGrid-SimpleCrossingS9N1-v0',
+             SymbolSequence([to_room_with_goal, move2goal]))
+global_transfer_taskset = TaskSet([ task5, task6 ], vocab)
+
+

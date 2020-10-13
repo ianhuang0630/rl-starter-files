@@ -106,6 +106,9 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         logits = (1-switch)*policy_curr + switch*policy_next
         dist = Categorical(logits=F.log_softmax(logits, dim=1))
 
+        prob_in = prob_in.squeeze(1)
+        prob_out = prob_out.squeeze(1)
+
         return dist, value, switch, prob_out, prob_in
 
     def get_embedding(self, obs):
