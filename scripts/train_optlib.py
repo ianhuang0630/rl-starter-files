@@ -251,7 +251,7 @@ for idx, task in enumerate(task_set):
             header += ["return_" + key for key in return_per_episode.keys()]
             data += return_per_episode.values()
 
-            if status["num_frames"] == 0 and idx == 0:
+            if status["num_frames"] == 0 and num_frames == logs["num_frames"] and idx == 0:
                 csv_logger.writerow(header)
             csv_logger.writerow(data)
             csv_file.flush()
