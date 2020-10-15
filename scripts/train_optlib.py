@@ -198,7 +198,7 @@ for idx, task in enumerate(task_set):
     txt_logger.info("Optimizer loaded\n")
 
     # loading the task symbols.
-    while num_frames < idx*args.frames: # a2c gives 5 frames a time by default
+    while num_frames < (idx+1)*args.frames: # a2c gives 5 frames a time by default
         # Update model parameters
         update_start_time = time.time()
 
