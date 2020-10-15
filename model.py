@@ -30,7 +30,8 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
                 output set of the estimator
     - theta_pol: the policy parameters
     """
-    def __init__(self, obs_space, action_space, vocab_embedding_size=5, task_embedding_size=1):
+    def __init__(self, obs_space, action_space, vocab_size, num_tasks,
+                 vocab_embedding_size=3, task_embedding_size=3):
         super().__init__()
         # image-related transforms
         self.image_conv = nn.Sequential(
@@ -53,6 +54,9 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         self.output_dim = action_space.n
         self.vocab_embedding_size = vocab_embedding_size
         self.task_embedding_size = task_embedding_size
+
+        self.task_embedding = nn.Linear(num_tasks, task_embedding_size)
+        self.vocab_embedding = nn.Linear(vocab_size, vocab_embedding_size)
 
         # below are the probability distributions over the state space,
         # conditioned on symbols
@@ -87,9 +91,13 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
     def forward(self, obs):
 
         emb = self.get_embedding(obs)
-        emb_curr_symb = torch.cat((emb, obs.curr_symbol), dim=1)
-        emb_next_symb = torch.cat((emb, obs.next_symbol), dim=1)
-        emb_task = torch.cat((emb, obs.task), dim=1)
+        curr_symb_emb = self.vocab_embedding(obs.curr_symbol)
+        next_symb_emb = self.vocab_embedding(obs.next_symbol)
+        task_emb = self.task_embedding(obs.task)
+
+        emb_curr_symb = torch.cat((emb, curr_symb_emb), dim=1)
+        emb_next_symb = torch.cat((emb, next_symb_emb), dim=1)
+        emb_task = torch.cat((emb, task_emb), dim=1)
 
         prob_out = self.prob_out(emb_curr_symb)
         bdist = Bernoulli(prob_out)

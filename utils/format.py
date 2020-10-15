@@ -45,9 +45,9 @@ def get_obss_optlib_preprocessor(obs_space):
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
                 "image": preprocess_images(obss, device=device),
-                "task": torch.tensor(obss['task'], device=device),
-                "curr_symbol": torch.tensor(obss['curr_symbol'], device=device),
-                "next_symbol": torch.tensor(obss['next_symbol'], device=device)
+                "task": torch.tensor(obss['task'], device=device, dtype=torch.float),
+                "curr_symbol": torch.tensor(obss['curr_symbol'], device=device, dtype=torch.float),
+                "next_symbol": torch.tensor(obss['next_symbol'], device=device, dtype=torch.float)
             })
 
     # Check if it is a MiniGrid observation space
@@ -60,9 +60,9 @@ def get_obss_optlib_preprocessor(obs_space):
             return torch_ac.DictList({
                 "image": preprocess_images([obs["image"] for obs in obss], device=device),
                 "text": preprocess_texts([obs["mission"] for obs in obss], vocab, device=device),
-                "task": torch.tensor([obs["task"] for obs in obss], device=device),
-                "curr_symbol": torch.tensor([obs["curr_symbol"] for obs in obss], device=device),
-                "next_symbol": torch.tensor([obs["next_symbol"] for obs in obss], device=device)
+                "task": torch.tensor([obs["task"] for obs in obss], device=device, dtype=torch.float),
+                "curr_symbol": torch.tensor([obs["curr_symbol"] for obs in obss], device=device, dtype=torch.float),
+                "next_symbol": torch.tensor([obs["next_symbol"] for obs in obss], device=device, dtype=torch.float)
             })
         preprocess_obss.vocab = vocab
 

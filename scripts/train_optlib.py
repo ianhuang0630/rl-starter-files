@@ -19,6 +19,8 @@ parser = argparse.ArgumentParser()
 # General parameters
 parser.add_argument("--algo", required=True,
                     help="algorithm to use: a2c | ppo (REQUIRED)")
+parser.add_argument("--model-type", required=True,
+                    help="model type: vanilla | optlib (REQUIRED)")  # added
 parser.add_argument("--model", default=None,
                     help="name of the model (default: {ENV}_{ALGO}_{TIME})")
 parser.add_argument("--seed", type=int, default=1,
@@ -62,7 +64,13 @@ parser.add_argument("--recurrence", type=int, default=1,
 parser.add_argument("--text", action="store_true", default=False,
                     help="add a GRU to the model to handle text input")
 
+parser.add_argument("--transfer", action="store_true", default=False,
+                    help="switch to transfer tasks, starting from the model parameters pointed to by `--model`.")
+
 args = parser.parse_args()
+
+if args.transfer:
+    assert args.model is not None, "--model must be specified if you are transferring to testing tasks."
 
 args.mem = args.recurrence > 1
 
@@ -107,32 +115,46 @@ txt_logger.info("Training status loaded\n")
 
 # Load environments for different tasks
 envs = []  # envs will become a list of lists
-# TODO: environments across different tasks, and random initializations within 
-# the same task
-for task in tasks.global_taskset:
+# environments across different tasks, and random initializations within the same task
+task_set = tasks.global_task_setup.transfer_task_set if args.transfer else tasks.global_task_setup.base_task_set
+
+for task in task_set:
     task_envs = []
     for i in range(args.procs):
         task_envs.append(
             utils.make_env(
                 task.env,
                 args.seed + 10000 * i,
-                optlib=True,
+                optlib = args.model_type == 'optlib',
                 task=task
             ))
         # envs.append(utils.make_env(args.env, args.seed + 10000 * i))
     envs.append(task_envs)
-assert len(envs) == tasks.global_taskset.size  # Tasks x processes
+assert len(envs) == task_set.size  # Tasks x processes
 # Load observations preprocessor
 # NOTE: assuming that all environments have the same observation space
 # NOTE: assuming that all environments have the same action space
-obs_space, preprocess_obss = utils.get_obss_optlib_preprocessor(envs[0][0].observation_space)
+if args.model_type == 'optlib':
+    obs_space, preprocess_obss = utils.get_obss_optlib_preprocessor(envs[0][0].observation_space)
+elif args.model_type == 'vanilla':
+    obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0][0].observation_space)
+else:
+    raise ValueError('Model type invalid')
 
 if "vocab" in status:
     preprocess_obss.vocab.load_vocab(status["vocab"])  # NOTE: this is a different vocab than the symbols, remove?
 txt_logger.info("Observations preprocessor loaded")
 
 # Load model
-optlibmodel = OpLibModel(obs_space, envs[0][0].action_space)
+# TODO have a choice for what kind of model to load
+if args.model_type == 'vanilla':
+    optlibmodel = ACModel(obs_space, envs[0][0].action_space, args.mem, args.text)
+elif args.model_type == 'optlib':
+    vocab_size = tasks.vocab.size
+    taskset_size = tasks.global_task_setup.num_unique_tasks
+    optlibmodel = OpLibModel(obs_space, envs[0][0].action_space, vocab_size, taskset_size)
+else:
+    raise ValueError('Model type invalid')
 
 if "model_state" in status:
     optlibmodel.load_state_dict(status["model_state"])
@@ -149,9 +171,11 @@ start_time = time.time()
 
 # TODO: iterating through a sequence of different tasks, with symbols as input into models.
 # model dynamically chooses sequence of different modules (options) based on these symbols
-task_set = tasks.global_taskset
+txt_logger.info("Training on {} tasks".format('TRANSFER' if args.transfer else 'BASE'))
 
 for idx, task in enumerate(task_set):
+
+    txt_logger.info('TASK: {}\n'.format(task))
 
     assert isinstance(task, tasks.Task), \
         "something went wrong, task needs to be of type Task"
@@ -174,7 +198,7 @@ for idx, task in enumerate(task_set):
     txt_logger.info("Optimizer loaded\n")
 
     # loading the task symbols.
-    while num_frames < args.frames: # a2c gives 5 frames a time by default
+    while num_frames < idx*args.frames: # a2c gives 5 frames a time by default
         # Update model parameters
         update_start_time = time.time()
 

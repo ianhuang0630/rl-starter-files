@@ -43,7 +43,8 @@ class OptLibEnv(gym.Env):
             obs['next_symbol'] = self.task.encode_symbol(self.symbSeq[self.symbidx])
         else:
             obs['next_symbol'] = self.task.encode_symbol(self.symbSeq[self.symbidx+1])
-        obs['task'] = [1]  # TODO keep as a single 1 for now
+
+        obs['task'] = self.task.encode_self() 
         return obs
 
     def reset(self):
