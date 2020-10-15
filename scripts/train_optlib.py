@@ -76,7 +76,6 @@ if args.transfer:
     assert args.pretrained_model is not None, "--model must be specified if you are transferring to testing tasks."
 
 args.mem = args.recurrence > 1
-
 # Set run dir
 
 date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")

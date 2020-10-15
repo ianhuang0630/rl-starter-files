@@ -87,6 +87,8 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
             nn.Linear(64, 1)
         )
 
+        # following the default model.
+        self.apply(init_params)
 
     def forward(self, obs):
 
