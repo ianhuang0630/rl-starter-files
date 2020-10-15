@@ -23,6 +23,9 @@ parser.add_argument("--model-type", required=True,
                     help="model type: vanilla | optlib (REQUIRED)")  # added
 parser.add_argument("--model", default=None,
                     help="name of the model (default: {ENV}_{ALGO}_{TIME})")
+parser.add_argument("--pretrained-model", default=None,
+                    help="name of the model that's pretrained")
+
 parser.add_argument("--seed", type=int, default=1,
                     help="random seed (default: 1)")
 parser.add_argument("--log-interval", type=int, default=1,
@@ -70,7 +73,7 @@ parser.add_argument("--transfer", action="store_true", default=False,
 args = parser.parse_args()
 
 if args.transfer:
-    assert args.model is not None, "--model must be specified if you are transferring to testing tasks."
+    assert args.pretrained_model is not None, "--model must be specified if you are transferring to testing tasks."
 
 args.mem = args.recurrence > 1
 
@@ -82,6 +85,9 @@ default_model_name = f"{args.algo}_seed{args.seed}_{date}"
 
 model_name = args.model or default_model_name
 model_dir = utils.get_model_dir(model_name)
+
+if args.transfer:
+    pretrained_model_dir = utils.get_model_dir(args.pretrained_model)
 
 # Load loggers and Tensorboard writer
 
@@ -111,6 +117,9 @@ try:
 except OSError:
     status = {"num_frames": 0, "update": 0}
 txt_logger.info("Training status loaded\n")
+
+if args.transfer:
+    pretrained_status = utils.get_status(pretrained_model_dir)
 
 
 # Load environments for different tasks
@@ -146,7 +155,6 @@ if "vocab" in status:
 txt_logger.info("Observations preprocessor loaded")
 
 # Load model
-# TODO have a choice for what kind of model to load
 if args.model_type == 'vanilla':
     optlibmodel = ACModel(obs_space, envs[0][0].action_space, args.mem, args.text)
 elif args.model_type == 'optlib':
@@ -156,8 +164,14 @@ elif args.model_type == 'optlib':
 else:
     raise ValueError('Model type invalid')
 
-if "model_state" in status:
-    optlibmodel.load_state_dict(status["model_state"])
+if args.transfer:
+    assert "model_state" in pretrained_status, "pretrained model should have recorded model state"
+    optlibmodel.load_state_dict(pretrained_status["model_state"])
+
+else:
+    if "model_state" in status:
+        optlibmodel.load_state_dict(status["model_state"])
+
 optlibmodel.to(device)
 txt_logger.info("Model loaded\n")
 txt_logger.info("{}\n".format(optlibmodel))
@@ -169,8 +183,7 @@ update = status["update"]
 start_time = time.time()
 
 
-# TODO: iterating through a sequence of different tasks, with symbols as input into models.
-# model dynamically chooses sequence of different modules (options) based on these symbols
+# iterating through a sequence of different tasks, with symbols as input into models.
 txt_logger.info("Training on {} tasks".format('TRANSFER' if args.transfer else 'BASE'))
 
 for idx, task in enumerate(task_set):
@@ -222,8 +235,8 @@ for idx, task in enumerate(task_set):
             rreturn_per_episode = utils.synthesize(logs["reshaped_return_per_episode"])
             num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
 
-            header = ["update", "frames", "FPS", "duration"]
-            data = [update, num_frames, fps, duration]
+            header = ["Task", "update", "frames", "FPS", "duration"]
+            data = [idx, update, num_frames, fps, duration]
             header += ["rreturn_" + key for key in rreturn_per_episode.keys()]
             data += rreturn_per_episode.values()
             header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
@@ -232,13 +245,13 @@ for idx, task in enumerate(task_set):
             data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
 
             txt_logger.info(
-                "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
+                "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
                 .format(*data))
 
             header += ["return_" + key for key in return_per_episode.keys()]
             data += return_per_episode.values()
 
-            if status["num_frames"] == 0:
+            if status["num_frames"] == 0 and idx == 0:
                 csv_logger.writerow(header)
             csv_logger.writerow(data)
             csv_file.flush()
