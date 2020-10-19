@@ -11,6 +11,7 @@ from model import ACModel, OpLibModel
 
 # for multitask option learning
 import utils.tasks as tasks  # script won't be executed if it's been already loaded
+import numpy as np
 
 # Parse arguments
 
@@ -214,6 +215,7 @@ for idx, task in enumerate(task_set):
         # Update model parameters
         update_start_time = time.time()
 
+        # TODO experiences should also include switch decisions.
         exps, logs1 = algo.collect_experiences()
         logs2 = algo.update_parameters(exps)  # updates parameters every 5 frames
 
@@ -226,7 +228,6 @@ for idx, task in enumerate(task_set):
         update += 1
 
         # Print logs
-
         if update % args.log_interval == 0:
             fps = logs["num_frames"]/(update_end_time - update_start_time)
             duration = int(time.time() - start_time)
@@ -243,13 +244,19 @@ for idx, task in enumerate(task_set):
             header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
             data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
 
+            # heading switch statistics
+            total_switches_per_process = np.sum(logs['switches'], axis=0, dtype=np.int).tolist()
+
             txt_logger.info(
-                "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
-                .format(*data))
+                "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | C {}"
+                .format(*data, total_switches_per_process))
+
+            # tack on before final csv save.
+            header += ['proc{}_total_switches'.format(i+1) for i in range(len(total_switches_per_process))]
+            data += total_switches_per_process
 
             header += ["return_" + key for key in return_per_episode.keys()]
             data += return_per_episode.values()
-
             if status["num_frames"] == 0 and num_frames == logs["num_frames"] and idx == 0:
                 csv_logger.writerow(header)
             csv_logger.writerow(data)

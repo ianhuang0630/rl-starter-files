@@ -7,9 +7,13 @@ class TaskSetup(object):
         assert len(task_sets) == 2, 'other lengths not supported at this moment'
 
         self.unique_tasks = set([])
+        self.id2task = {}
         for task_set in task_sets:
             for task in task_set:
                 self.unique_tasks.add(task.id)
+                self.id2task[task.id] = task
+
+        self.idx2taskid = {idx: taskid for idx, taskid in enumerate(list(self.unique_tasks))}
         taskid2idx = {taskid: idx  for idx, taskid in enumerate(list(self.unique_tasks))}
 
         for task_set in task_sets:
@@ -31,6 +35,14 @@ class TaskSetup(object):
     @property
     def transfer_task_set(self):
         return self.transfer_set
+
+    def get_task_by_id(self, id_):
+        assert id_ in self.id2task, 'Invalid task id'
+        return self.id2task[id_]
+
+    def get_taskid_by_idx(self, idx):
+        assert idx in self.idx2taskid
+        return self.idx2taskid[idx]
 
 class TaskSet(object):
     """
@@ -144,6 +156,11 @@ class SymbVocabulary(object):
         self.symbols = symbols
         self.symbol2idx = {symbol: idx for idx, symbol in enumerate(self.symbols)}
 
+
+    def decode(self, rep):
+        index = rep.index(1)
+        return self.symbols[index]
+
     def encode(self, symbol):
         assert symbol in self.symbol2idx, "Invalid symbol"
         rep = [0] * self.size
@@ -191,3 +208,8 @@ global_transfer_taskset = TaskSet([ task5, task6 ], vocab)
 
 global_task_setup = TaskSetup([global_taskset, global_transfer_taskset])
 
+def get_task(task_id):
+    return global_task_setup.get_task_by_id(task_id)
+
+def get_subtask_id(task, subtask_encoding):
+    return task.symbol_vocab.decode(subtask_encoding).id

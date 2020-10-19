@@ -28,6 +28,10 @@ class OptLibEnv(gym.Env):
         return obs, reward, done, info
 
     @property
+    def window(self):
+        return self.env.window
+
+    @property
     def observation_space(self):
         # add now the observation of task and symbol ids
         obs_space = self.env.observation_space
@@ -46,6 +50,9 @@ class OptLibEnv(gym.Env):
 
         obs['task'] = self.task.encode_self() 
         return obs
+
+    def render(self, *args, **kwargs):
+        return self.env.render(*args, **kwargs)
 
     def reset(self):
         """ resetting symbidx before resetting env.
