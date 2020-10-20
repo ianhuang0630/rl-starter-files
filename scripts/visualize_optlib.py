@@ -82,9 +82,7 @@ for episode in range(args.episodes):
 
     obs = env.reset()
 
-    counter = 0
-    while counter < 100:
-        counter += 1
+    while True:
         env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
         if args.gif:
             # frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
