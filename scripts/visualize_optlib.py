@@ -45,7 +45,7 @@ utils.seed(args.seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}\n")
 
-if args.model_type == 'optlib':
+if args.model_type == 'optlib' or args.task_id is not None:
     assert args.task_id is not None, '--task-id cannot be None if using optlib'
     task = tasks.get_task(args.task_id)
     env_name = task.env
@@ -87,8 +87,8 @@ for episode in range(args.episodes):
         counter += 1
         env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
         if args.gif:
-            frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
-
+            # frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
+            frames.append(numpy.moveaxis(env.render("human"), 2, 0))
         preds = agent.get_action(obs)
         if args.model_type == 'vanilla':
             obs, reward, done, _ = env.step(preds['action'])
