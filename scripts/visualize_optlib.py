@@ -70,21 +70,22 @@ agent = utils.Agent(env.observation_space, env.action_space, args.model_type,
 print("Agent loaded\n")
 
 # Run the agent
-
 if args.gif:
-   from array2gif import write_gif
-   frames = []
+    from array2gif import write_gif
 
 # Create a window to view the environment
 env.render('human')
 this_subtask=''
 for episode in range(args.episodes):
+    if args.gif:
+        frames = []
+
     obs = env.reset()
 
     counter = 0
     while counter < 100:
         counter += 1
-        env.render('human', title='experiment {}: {}'.format(counter, this_subtask))
+        env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
         if args.gif:
             frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
 
@@ -102,12 +103,14 @@ for episode in range(args.episodes):
             break
 
     if not done:
-        print("Failed experiment number {}".format(counter))
+        print("Failed experiment number {}".format(episode+1))
+    else:
+        # save gif
+        if args.gif:
+            print("Saving gif... ", end="")
+            write_gif(numpy.array(frames), args.gif+"{}.gif".format(episode+1), fps=1/args.pause)
+            print("Done.")
 
     if env.window.closed:
         break
 
-if args.gif:
-    print("Saving gif... ", end="")
-    write_gif(numpy.array(frames), args.gif+".gif", fps=1/args.pause)
-    print("Done.")
