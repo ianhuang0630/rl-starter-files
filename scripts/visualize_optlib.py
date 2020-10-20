@@ -81,8 +81,10 @@ this_subtask=''
 for episode in range(args.episodes):
     obs = env.reset()
 
-    while True:
-        env.render('human', title=this_subtask)
+    counter = 0
+    while counter < 100:
+        counter += 1
+        env.render('human', title='experiment {}: {}'.format(counter, this_subtask))
         if args.gif:
             frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
 
@@ -98,6 +100,9 @@ for episode in range(args.episodes):
 
         if done or env.window.closed:
             break
+
+    if not done:
+        print("Failed experiment number {}".format(counter))
 
     if env.window.closed:
         break
