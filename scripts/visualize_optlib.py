@@ -6,6 +6,7 @@ import torch
 import utils
 import utils.tasks as tasks  # script won't be executed if it's been already loaded
 # Parse arguments
+from PIL import Image
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", required=True,
@@ -81,12 +82,18 @@ for episode in range(args.episodes):
         frames = []
 
     obs = env.reset()
-
+    
+    counter = 0
     while True:
-        env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
+        counter += 1
+        wholefig_frame = env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
         if args.gif:
-            # frames.append(numpy.moveaxis(env.render("rgb_array"), 2, 0))
-            frames.append(numpy.moveaxis(env.render("human"), 2, 0))
+            foo = numpy.moveaxis(env.render("rgb_array"), 2, 0)
+            frames.append(foo)
+            # save wholefig_frame
+            im = Image.fromarray(wholefig_frame)
+            im.save(args.gif+'{}_frame{}.png'.format(episode+1, counter))
+
         preds = agent.get_action(obs)
         if args.model_type == 'vanilla':
             obs, reward, done, _ = env.step(preds['action'])
