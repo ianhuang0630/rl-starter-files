@@ -173,7 +173,7 @@ class SymbVocabulary(object):
     def __str__(self):
         return "\n".join([str(symb) for symb in self.symbols])
 
-    @property
+    @property 
     def size(self):
         return len(self.symbols)
 
@@ -195,7 +195,9 @@ task2 = Task('to-goal', 'MiniGrid-FourRooms-Get2Goal-v0',
 task3 = Task('4-room', 'MiniGrid-FourRooms-v0',
              SymbolSequence([to_room_with_goal, move2goal]))
 task4 = Task('unlock', 'MiniGrid-Unlock-v0',
-             SymbolSequence([move2key, unlockcorrectdoor, to_room_with_goal, move2goal]))
+             SymbolSequence([move2key, unlockcorrectdoor])) # this has been changed
+
+# before, it was the same as the structure of task 5
 
 vocab = SymbVocabulary([move2goal, pickupgoal, move2key, unlockcorrectdoor, to_room_with_goal])
 global_taskset = TaskSet([task1, task2, task3, task4], vocab)
@@ -204,6 +206,7 @@ task5 = Task('door-key', 'MiniGrid-DoorKey-5x5-v0',
              SymbolSequence([move2key, unlockcorrectdoor, to_room_with_goal, move2goal]))
 task6 = Task('simple-crossing', 'MiniGrid-SimpleCrossingS9N1-v0',
              SymbolSequence([to_room_with_goal, move2goal]))
+
 global_transfer_taskset = TaskSet([ task5, task6 ], vocab)
 
 global_task_setup = TaskSetup([global_taskset, global_transfer_taskset])

@@ -5,6 +5,7 @@ import torch
 
 import utils
 import utils.tasks as tasks  # script won't be executed if it's been already loaded
+import os
 # Parse arguments
 from PIL import Image
 
@@ -31,6 +32,8 @@ parser.add_argument("--episodes", type=int, default=1000000,
                     help="number of episodes to visualize")
 parser.add_argument("--memory", action="store_true", default=False,
                     help="add a LSTM to the model")
+parser.add_argument("--save-frames", action="store_true", default=False,
+                    help="save frames")
 parser.add_argument("--text", action="store_true", default=False,
                     help="add a GRU to the model")
 
@@ -77,22 +80,41 @@ if args.gif:
 # Create a window to view the environment
 env.render('human')
 this_subtask=''
+
+# creating folders for frames
+if args.task_id is not None:
+    dir_path = os.path.join('viz', args.model, args.task_id)
+else:
+    dir_path = os.path.join('viz', args.model, args.env)
+
 for episode in range(args.episodes):
     if args.gif:
         frames = []
 
     obs = env.reset()
-    
+    this_subtask = tasks.get_subtask_id(task, obs['curr_symbol'])
+
     counter = 0
     while True:
         counter += 1
-        wholefig_frame = env.render('human', title='experiment {}: {}'.format(episode+1, this_subtask))
+
+        # generating new frame to save.
+        label = 'experiment {}: {}'.format(episode+1, this_subtask)
+        print(label)
+        wholefig_frame = env.render('human', title=label)
+
         if args.gif:
             foo = numpy.moveaxis(env.render("rgb_array"), 2, 0)
             frames.append(foo)
+
+        if args.save_frames:
             # save wholefig_frame
             im = Image.fromarray(wholefig_frame)
-            im.save(args.gif+'{}_frame{}.png'.format(episode+1, counter))
+            # folder is viz/model_name/environment-name/frame_number.png
+            subdir_path = os.path.join(dir_path, 'episode{}'.format(episode+1))
+            file_path = os.path.join(subdir_path, 'frame{}.png'.format(counter))
+            utils.create_folders_if_necessary(file_path)
+            im.save(file_path)
 
         preds = agent.get_action(obs)
         if args.model_type == 'vanilla':
@@ -105,16 +127,29 @@ for episode in range(args.episodes):
         agent.analyze_feedback(reward, done)
 
         if done or env.window.closed:
+            # final save
+            label = 'experiment {}: {}'.format(episode+1, this_subtask)
+            print("DONE! " + label)
+            wholefig_frame = env.render('human', title=label)
+
+            if args.gif:
+                foo = numpy.moveaxis(env.render("rgb_array"), 2, 0)
+                frames.append(foo)
+
+            if args.save_frames:
+                # save wholefig_frame
+                im = Image.fromarray(wholefig_frame)
+                subdir_path = os.path.join(dir_path, 'episode{}'.format(episode+1))
+                file_path = os.path.join(subdir_path, 'frame{}.png'.format(counter+1))
+                utils.create_folders_if_necessary(file_path)
+                im.save(file_path)
             break
 
-    if not done:
-        print("Failed experiment number {}".format(episode+1))
-    else:
-        # save gif
-        if args.gif:
-            print("Saving gif... ", end="")
-            write_gif(numpy.array(frames), args.gif+"{}.gif".format(episode+1), fps=1/args.pause)
-            print("Done.")
+    # save gif
+    if args.gif:
+        print("Saving gif... ", end="")
+        write_gif(numpy.array(frames), args.gif+"{}.gif".format(episode+1), fps=1/args.pause)
+        print("Done.")
 
     if env.window.closed:
         break
