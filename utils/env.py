@@ -48,7 +48,7 @@ class OptLibEnv(gym.Env):
         else:
             obs['next_symbol'] = self.task.encode_symbol(self.symbSeq[self.symbidx+1])
 
-        obs['task'] = self.task.encode_self() 
+        obs['task'] = self.task.encode_self()
         return obs
 
     def render(self, *args, **kwargs):
@@ -64,8 +64,11 @@ class OptLibEnv(gym.Env):
         return obs
 
 def make_env(env_key, seed=None, optlib=False, task=None):
-    env = gym.make(env_key)
-    env.seed(seed)
+    if isinstance(env_key, str):
+        env = gym.make(env_key)
+        env.seed(seed)
+    else:
+        env = env_key
     if optlib:
         assert task is not None
         env = OptLibEnv(env, task)

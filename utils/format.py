@@ -40,29 +40,34 @@ def get_obss_preprocessor(obs_space):
 def get_obss_optlib_preprocessor(obs_space):
     # Check if obs_space is an image space
     if isinstance(obs_space, gym.spaces.Box):
-        obs_space = {"image": obs_space.shape, "task": 1, "curr_symbol": 5, "next_symbol": 5}  # TODO: these numbers should come from the tasks.py
+        obs_space = {"image": obs_space.shape, "task": 1,
+                     "curr_symbol": 5, "next_symbol": 5,
+                     "key": 1}  # TODO: these numbers should come from the tasks.py
 
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
                 "image": preprocess_images(obss, device=device),
                 "task": torch.tensor(obss['task'], device=device, dtype=torch.float),
                 "curr_symbol": torch.tensor(obss['curr_symbol'], device=device, dtype=torch.float),
-                "next_symbol": torch.tensor(obss['next_symbol'], device=device, dtype=torch.float)
+                "next_symbol": torch.tensor(obss['next_symbol'], device=device, dtype=torch.float),
+                "key": torch.tensor(obss['key'], device=device, dtype=torch.float)
             })
 
     # Check if it is a MiniGrid observation space
     elif isinstance(obs_space, gym.spaces.Dict) and list(obs_space.spaces.keys()) == ["image"]:
-        obs_space = {"image": obs_space.spaces["image"].shape, "text": 100, "task": 1, "curr_symbol": 5, "next_symbol": 5}  # TODO: these numbers should come from the tasks.py
+        obs_space = {"image": obs_space.spaces["image"].shape,
+                     "text": 100, "task": 1,
+                     "curr_symbol": 5, "next_symbol": 5, "key": 1}  # TODO: these numbers should come from the tasks.py
 
         vocab = Vocabulary(obs_space["text"])
-
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
                 "image": preprocess_images([obs["image"] for obs in obss], device=device),
                 "text": preprocess_texts([obs["mission"] for obs in obss], vocab, device=device),
                 "task": torch.tensor([obs["task"] for obs in obss], device=device, dtype=torch.float),
                 "curr_symbol": torch.tensor([obs["curr_symbol"] for obs in obss], device=device, dtype=torch.float),
-                "next_symbol": torch.tensor([obs["next_symbol"] for obs in obss], device=device, dtype=torch.float)
+                "next_symbol": torch.tensor([obs["next_symbol"] for obs in obss], device=device, dtype=torch.float),
+                "key": torch.tensor([obs['key'] for obs in obss], device=device, dtype=torch.float)
             })
         preprocess_obss.vocab = vocab
 

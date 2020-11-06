@@ -12,7 +12,8 @@ class Agent:
     - to analyze the feedback (i.e. reward and done state) of its action."""
 
     def __init__(self, obs_space, action_space, model_type, model_dir,
-                 device=None, argmax=False, num_envs=1, use_memory=False, use_text=False):
+                 device=None, argmax=False, num_envs=1, use_memory=False,
+                 use_text=False, taskset_size=None):
 
         self.model_type = model_type
 
@@ -21,8 +22,10 @@ class Agent:
             self.acmodel = ACModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
         elif self.model_type == 'optlib':
             obs_space, self.preprocess_obss = utils.get_obss_optlib_preprocessor(obs_space)
+            # TODO these need to be replaced! to visualize the procedurlaly generated ones!
             vocab_size = tasks.vocab.size
-            taskset_size = tasks.global_task_setup.num_unique_tasks
+            if taskset_size is None:
+                taskset_size = tasks.global_task_setup.num_unique_tasks
             self.acmodel = OpLibModel(obs_space, action_space, vocab_size, taskset_size)
 
         self.device = device

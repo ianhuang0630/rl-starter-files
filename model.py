@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 import torch_ac
-
+import numpy as np
 from torch.distributions.bernoulli import Bernoulli
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
@@ -16,7 +16,7 @@ def init_params(m):
             m.bias.data.fill_(0)
 
 
-# TODO: a new type of model, OpLibModel(ACModel)
+# a new type of model, OpLibModel(ACModel)
 #####
 
 class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
@@ -47,6 +47,7 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         m = obs_space["image"][1]
         self.image_embedding_size = ((n-1)//2-2)*((m-1)//2-2)*64
         ########################################################
+        self.effective_embedding_size = self.image_embedding_size + 1 # added dimensionality of feature for key
 
         # TODO: intialized with a one-to-on mapping between function and option
         # random initialization of theta_in, theta_term, theta_pol
@@ -54,21 +55,20 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         self.output_dim = action_space.n
         self.vocab_embedding_size = vocab_embedding_size
         self.task_embedding_size = task_embedding_size
-
         self.task_embedding = nn.Linear(num_tasks, task_embedding_size)
         self.vocab_embedding = nn.Linear(vocab_size, vocab_embedding_size)
 
         # below are the probability distributions over the state space,
         # conditioned on symbols
         self.prob_in = nn.Sequential(
-            nn.Linear(self.image_embedding_size + self.vocab_embedding_size, 64),
+            nn.Linear(self.effective_embedding_size + self.vocab_embedding_size, 64),
             nn.Tanh(),
             nn.Linear(64, 1),
             nn.Sigmoid()
         )
 
         self.prob_out = nn.Sequential(
-            nn.Linear(self.image_embedding_size + self.vocab_embedding_size, 64),
+            nn.Linear(self.effective_embedding_size + self.vocab_embedding_size, 64),
             nn.Tanh(),
             nn.Linear(64, 1),
             nn.Sigmoid()
@@ -76,19 +76,79 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
 
         # below are actor and critic
         self.actor = nn.Sequential(
-            nn.Linear(self.image_embedding_size + self.vocab_embedding_size, 64),
+            nn.Linear(self.effective_embedding_size + self.vocab_embedding_size, 64),
             nn.Tanh(),
             nn.Linear(64, action_space.n)
         )
 
         self.critic = nn.Sequential(
-            nn.Linear(self.image_embedding_size + self.task_embedding_size, 64),
+            nn.Linear(self.effective_embedding_size + self.task_embedding_size, 64),
             nn.Tanh(),
             nn.Linear(64, 1)
         )
 
         # following the default model.
         self.apply(init_params)
+
+        self.eval_mode = False
+
+    def forward(self, obs):
+
+        emb = self.get_embedding(obs)
+        curr_symb_emb = self.vocab_embedding(obs.curr_symbol)
+        next_symb_emb = self.vocab_embedding(obs.next_symbol)
+        if not self.eval_mode:
+            task_emb = self.task_embedding(obs.task)
+
+        emb_curr_symb = torch.cat((emb, curr_symb_emb), dim=1)
+        emb_next_symb = torch.cat((emb, next_symb_emb), dim=1)
+        if not self.eval_mode:
+            emb_task = torch.cat((emb, task_emb), dim=1)
+
+        prob_out = self.prob_out(emb_curr_symb)
+        bdist = Bernoulli(prob_out)
+        switch = bdist.sample()
+
+        prob_in_curr = self.prob_in(emb_curr_symb)
+        prob_in_next = self.prob_in(emb_next_symb)
+        prob_in = (1-switch)*prob_in_curr + switch*prob_in_next
+        if not self.eval_mode:
+            value = self.critic(emb_task)
+            value = value.squeeze(1)
+        else:
+            value = None
+        policy_curr = self.actor(emb_curr_symb)
+        policy_next = self.actor(emb_next_symb)
+        logits = (1-switch)*policy_curr + switch*policy_next
+        dist = Categorical(logits=F.log_softmax(logits, dim=1))
+
+        prob_in = prob_in.squeeze(1)
+        prob_out = prob_out.squeeze(1)
+
+        return dist, value, switch, prob_out, prob_in
+
+    def eval(self):
+        self.eval_mode = True
+
+    def get_embedding(self, obs):
+        x = obs.image.transpose(1, 3).transpose(2, 3)
+        x = self.image_conv(x)
+
+        # concat with the key information.
+        emb = x.reshape(x.shape[0], -1)
+        emb = torch.cat((emb, obs.key.unsqueeze(dim=1)), 1)
+        return emb
+
+
+class BetaModulatedOpLibModel(OpLibModel):
+    """
+    The same as the OptlibModel but with modulation of the transition probabilities.
+    """
+    def __init__(self, obs_space, action_space, vocab_size, num_tasks,
+                 vocab_embedding_size=3, task_embedding_size=3):
+        super().__init__(obs_space, action_space, vocab_size, num_tasks, vocab_embedding_size, task_embedding_size)
+        self.beta = 0 # this is weighting to counteract the early swapping.
+        self.beta_counter = -4
 
     def forward(self, obs):
 
@@ -102,7 +162,7 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         emb_task = torch.cat((emb, task_emb), dim=1)
 
         prob_out = self.prob_out(emb_curr_symb)
-        bdist = Bernoulli(prob_out)
+        bdist = Bernoulli(self.beta*prob_out)
         switch = bdist.sample()
 
         prob_in_curr = self.prob_in(emb_curr_symb)
@@ -121,11 +181,17 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
 
         return dist, value, switch, prob_out, prob_in
 
-    def get_embedding(self, obs):
-        x = obs.image.transpose(1, 3).transpose(2, 3)
-        x = self.image_conv(x)
-        emb = x.reshape(x.shape[0], -1)
-        return emb
+    def update_beta(self):
+        # this is kinda tricky.
+        self.beta_counter += 8e-5
+        # using sigmoid to return a nice beta
+        self.beta = 1/(1+np.exp(-self.beta_counter))
+        return self.beta
+
+    def eval(self):
+        print('setting beta value to one')
+        self.beta = 1
+        return super().eval()
 
 class ACModel(nn.Module, torch_ac.RecurrentACModel):
     def __init__(self, obs_space, action_space, use_memory=False, use_text=False):

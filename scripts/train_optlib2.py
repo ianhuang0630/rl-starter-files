@@ -7,7 +7,7 @@ import tensorboardX
 import sys
 
 import utils
-from model import ACModel, OpLibModel
+from model import ACModel, OpLibModel, BetaModulatedOpLibModel
 
 # for multitask option learning
 import utils.tasks as tasks  # script won't be executed if it's been already loaded
@@ -77,10 +77,9 @@ if args.transfer:
     assert args.pretrained_model is not None, "--model must be specified if you are transferring to testing tasks."
 
 args.mem = args.recurrence > 1
-# Set run dir
-
+# Set run dir date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+# default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}" # 
 date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
-# default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}" # TODO: env nolonger valid
 default_model_name = f"{args.algo}_seed{args.seed}_{date}"
 
 model_name = args.model or default_model_name
@@ -93,7 +92,7 @@ if args.transfer:
 
 txt_logger = utils.get_txt_logger(model_dir)
 csv_file, csv_logger = utils.get_csv_logger(model_dir)
-tb_writer = tensorboardX.SummaryWriter(model_dir)
+# tb_writer = tensorboardX.SummaryWriter(model_dir)
 
 # Log command and all script arguments
 
@@ -123,8 +122,10 @@ if args.transfer:
 
 
 # Load environments for different tasks
-envs = []  # envs will become a list of lists
+envs = {}  # envs will become a dictionary, where each entry is a list of environment instantiations.
 # environments across different tasks, and random initializations within the same task
+
+
 task_set = tasks.global_task_setup.transfer_task_set if args.transfer else tasks.global_task_setup.base_task_set
 
 for task in task_set:
@@ -138,15 +139,17 @@ for task in task_set:
                 task=task
             ))
         # envs.append(utils.make_env(args.env, args.seed + 10000 * i))
-    envs.append(task_envs)
+    envs[task.id] = task_envs
 assert len(envs) == task_set.size  # Tasks x processes
+
 # Load observations preprocessor
 # NOTE: assuming that all environments have the same observation space
 # NOTE: assuming that all environments have the same action space
+firstkey = list(envs.keys())[0]
 if args.model_type == 'optlib':
-    obs_space, preprocess_obss = utils.get_obss_optlib_preprocessor(envs[0][0].observation_space)
+    obs_space, preprocess_obss = utils.get_obss_optlib_preprocessor(envs[firstkey][0].observation_space)
 elif args.model_type == 'vanilla':
-    obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0][0].observation_space)
+    obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[firstkey][0].observation_space)
 else:
     raise ValueError('Model type invalid')
 
@@ -156,11 +159,11 @@ txt_logger.info("Observations preprocessor loaded")
 
 # Load model
 if args.model_type == 'vanilla':
-    optlibmodel = ACModel(obs_space, envs[0][0].action_space, args.mem, args.text)
+    optlibmodel = ACModel(obs_space, envs[firstkey][0].action_space, args.mem, args.text)
 elif args.model_type == 'optlib':
     vocab_size = tasks.vocab.size
     taskset_size = tasks.global_task_setup.num_unique_tasks
-    optlibmodel = OpLibModel(obs_space, envs[0][0].action_space, vocab_size, taskset_size)
+    optlibmodel = BetaModulatedOpLibModel(obs_space, envs[firstkey][0].action_space, vocab_size, taskset_size)
 else:
     raise ValueError('Model type invalid')
 
@@ -186,22 +189,21 @@ start_time = time.time()
 # iterating through a sequence of different tasks, with symbols as input into models.
 txt_logger.info("Training on {} tasks".format('TRANSFER' if args.transfer else 'BASE'))
 
+# NOTE: shuffle tasks?
 # NOTE: perhaps what we should pretrain all the policy networks first.
 # NOTE: making the boundaries soft?
-# NOTE: shuffle tasks?
 
+task2algo = {} # creating dictionary mapping each task to an algorithm instantiation .
 for idx, task in enumerate(task_set):
-
-    txt_logger.info('TASK: {}\n'.format(task))
+    txt_logger.info('Loading optimizing algorithm for task {}'.format(task))
 
     assert isinstance(task, tasks.Task), \
         "something went wrong, task needs to be of type Task"
-    task_specific_envs = envs[idx]
-
+    task_specific_envs = envs[task.id]
     # instantiate algo based on the environment of the current task
     if args.algo == "a2c":
         algo = torch_ac.A2CAlgo(task_specific_envs, optlibmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-                                args.entropy_coef, args.lensvalue_loss_coef, args.max_grad_norm, args.recurrence,
+                                args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                                 args.optim_alpha, args.optim_eps, preprocess_obss)
     elif args.algo == "ppo":
         algo = torch_ac.PPOAlgo(task_specific_envs, optlibmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
@@ -212,70 +214,89 @@ for idx, task in enumerate(task_set):
 
     if "optimizer_state" in status:
         algo.optimizer.load_state_dict(status["optimizer_state"])
+
     txt_logger.info("Optimizer loaded\n")
 
-    # loading the task symbols.
-    while num_frames < (idx+1)*args.frames: # a2c gives 5 frames a time by default
-        # Update model parameters
-        update_start_time = time.time()
+    # saving into dictionary.
+    task2algo[task.id] = algo
 
-        # TODO experiences should also include switch decisions.
-        exps, logs1 = algo.collect_experiences()
-        logs2 = algo.update_parameters(exps)  # updates parameters every 5 frames
+    txt_logger.info('TASK: {}\n'.format(task))
 
-        #### all logging
 
-        logs = {**logs1, **logs2}
-        update_end_time = time.time()
+# loading the task symbols.
+while num_frames < args.frames: # a2c gives 5 frames a time by default
+    # Update model parameters
+    update_start_time = time.time()
 
-        num_frames += logs["num_frames"]
-        update += 1
+    # sample task from the task distribution
+    sample_task_id = np.random.choice(list(task2algo.keys()))
+    task = tasks.get_task(sample_task_id)
+    algo = task2algo[sample_task_id]
 
-        # Print logs
-        if update % args.log_interval == 0:
-            fps = logs["num_frames"]/(update_end_time - update_start_time)
-            duration = int(time.time() - start_time)
-            return_per_episode = utils.synthesize(logs["return_per_episode"])
-            rreturn_per_episode = utils.synthesize(logs["reshaped_return_per_episode"])
-            num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
+    # experiences should also include switch decisions.
+    exps, logs1 = algo.collect_experiences()
+    logs2 = algo.update_parameters(exps)  # updates parameters every 5 frames
 
-            header = ["Task", "update", "frames", "FPS", "duration"]
-            data = [idx, update, num_frames, fps, duration]
-            header += ["rreturn_" + key for key in rreturn_per_episode.keys()]
-            data += rreturn_per_episode.values()
-            header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
-            data += num_frames_per_episode.values()
-            header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
-            data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
+    #### all logging
+    logs = {**logs1, **logs2}
+    update_end_time = time.time()
+    num_frames += logs["num_frames"]
+    update += 1
 
-            # heading switch statistics
-            total_switches_per_process = np.sum(logs['switches'], axis=0, dtype=np.int).tolist()
+    if args.model_type == 'optlib':
+        beta_value = optlibmodel.update_beta()
+    else:
+        beta_value = None
 
-            txt_logger.info(
-                "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | C {}"
-                .format(*data, total_switches_per_process))
+    # Print logs
+    if update % args.log_interval == 0:
+        fps = logs["num_frames"]/(update_end_time - update_start_time)
+        duration = int(time.time() - start_time)
+        return_per_episode = utils.synthesize(logs["return_per_episode"])
+        rreturn_per_episode = utils.synthesize(logs["reshaped_return_per_episode"])
+        num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
 
-            # tack on before final csv save.
-            header += ['proc{}_total_switches'.format(i+1) for i in range(len(total_switches_per_process))]
-            data += total_switches_per_process
+        header = ["Task", "update", "frames", "FPS", "duration"]
+        data = [sample_task_id, update, num_frames, fps, duration]
+        header += ["rreturn_" + key for key in rreturn_per_episode.keys()]
+        data += rreturn_per_episode.values()
+        header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
+        data += num_frames_per_episode.values()
+        header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
+        data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
 
-            header += ["return_" + key for key in return_per_episode.keys()]
-            data += return_per_episode.values()
-            if status["num_frames"] == 0 and num_frames == logs["num_frames"] and idx == 0:
-                csv_logger.writerow(header)
-            csv_logger.writerow(data)
-            csv_file.flush()
+        # heading switch statistics
+        total_switches_per_process = np.sum(logs['switches'], axis=0, dtype=np.int).tolist()
 
-            for field, value in zip(header, data):
-                tb_writer.add_scalar(field, value, num_frames)
+        if beta_value is None:
+            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | C {}".format(*data, total_switches_per_process)
+        else:
+            header += ['beta']
+            data += [beta_value]
+            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | B {} | C {}".format(*data, total_switches_per_process)
 
-        # Save status
+        txt_logger.info(infoline)
 
-        if args.save_interval > 0 and update % args.save_interval == 0:
-            status = {"num_frames": num_frames, "update": update,
-                      "model_state": optlibmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
-            if hasattr(preprocess_obss, "vocab"):
-                status["vocab"] = preprocess_obss.vocab.vocab
-            utils.save_status(status, model_dir)
-            txt_logger.info("Status saved")
-    
+        # tack on before final csv save.
+        header += ['proc{}_total_switches'.format(i+1) for i in range(len(total_switches_per_process))]
+        data += total_switches_per_process
+
+        header += ["return_" + key for key in return_per_episode.keys()]
+        data += return_per_episode.values()
+        if status["num_frames"] == 0 and num_frames == logs["num_frames"]:
+            csv_logger.writerow(header)
+        csv_logger.writerow(data)
+        csv_file.flush()
+
+        #for field, value in zip(header, data):
+            #tb_writer.add_scalar(field, value, num_frames)
+
+    # Save status
+    if args.save_interval > 0 and update % args.save_interval == 0:
+        status = {"num_frames": num_frames, "update": update,
+                    "model_state": optlibmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
+        if hasattr(preprocess_obss, "vocab"):
+            status["vocab"] = preprocess_obss.vocab.vocab
+        utils.save_status(status, model_dir)
+        txt_logger.info("Status saved")
+

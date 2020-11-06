@@ -1,6 +1,10 @@
 """
 Implementation of a task set
 """
+import numpy as np
+from utils.proc_env import *
+from gym_minigrid.envs import ProceduralEnv
+from gym_minigrid.register import register
 
 class TaskSetup(object):
     def __init__(self, task_sets):
@@ -9,18 +13,20 @@ class TaskSetup(object):
         self.unique_tasks = set([])
         self.id2task = {}
         for task_set in task_sets:
-            for task in task_set:
-                self.unique_tasks.add(task.id)
-                self.id2task[task.id] = task
+            if task_set is not None:
+                for task in task_set:
+                    self.unique_tasks.add(task.id)
+                    self.id2task[task.id] = task
 
         self.idx2taskid = {idx: taskid for idx, taskid in enumerate(list(self.unique_tasks))}
         taskid2idx = {taskid: idx  for idx, taskid in enumerate(list(self.unique_tasks))}
 
         for task_set in task_sets:
-            for task in task_set:
-                encoding = [0]*len(taskid2idx)
-                encoding[taskid2idx[task.id]] = 1 
-                task.set_id_encoding(encoding)
+            if task_set is not None:
+                for task in task_set:
+                    encoding = [0]*len(taskid2idx)
+                    encoding[taskid2idx[task.id]] = 1
+                    task.set_id_encoding(encoding)
         self.base_set = task_sets[0]
         self.transfer_set = task_sets[1]
 
@@ -32,7 +38,7 @@ class TaskSetup(object):
     def base_task_set(self):
         return self.base_set
 
-    @property
+   
     def transfer_task_set(self):
         return self.transfer_set
 
@@ -71,10 +77,13 @@ class TaskSet(object):
     def __str__(self):
         return "\n".join([str(task) for task in self.task_set])
 
+# TODO:
 class Task(object):
     def __init__(self, name, environment, symbol_sequence):
         self.name = name
+        # this can either be a string or the whole environment object.
         self.env_str = environment
+
         assert isinstance(symbol_sequence, SymbolSequence)
         self.symbol_seq = symbol_sequence
 
@@ -98,7 +107,11 @@ class Task(object):
         return self.symbol_vocab.encode(symb)
 
     def __str__(self):
-        return "{}: {}  |  {}".format(self.name, self.env_str, str(self.symbol_seq))
+        if isinstance(self.env_str, str):
+            s = "{}: {}  |  {}".format(self.name, self.env_str, str(self.symbol_seq))
+        else:
+            s = "{} | {}".format(self.name, str(self.symbol_seq))
+        return s
 
     def hook_vocab(self, vocab):
         self.symbol_vocab = vocab
@@ -131,7 +144,6 @@ class SymbolSequence(object):
 
     def __len__(self):
         return len(self.seq)
-
 
 class Symbol(object):
     def __init__(self, id_, description=None):
@@ -173,7 +185,7 @@ class SymbVocabulary(object):
     def __str__(self):
         return "\n".join([str(symb) for symb in self.symbols])
 
-    @property 
+    @property
     def size(self):
         return len(self.symbols)
 
@@ -181,10 +193,78 @@ class SymbVocabulary(object):
 
 ### creating the different tasks, and environment combos.
 move2goal = Symbol('move2goal', description='TODO')
-pickupgoal = Symbol('pickupgoal', description='TODO')
 move2key = Symbol('move2key', description='TODO')
 unlockcorrectdoor = Symbol('unlock_correct_door', description='TODO')
 to_room_with_goal = Symbol('to_room_with_goal', description='TODO')
+
+
+# TODO: Different permutations.
+# Two dimensions of difficulty: size of rooms and length of task sequence.
+# starting at task_sequences of length 1, increase the size of the rooms
+# increment the task_sequence.
+subtasks = [move2goal, move2key, unlockcorrectdoor, to_room_with_goal]
+
+def get_procedural_taskenvs(num_procs, num_tasks_per_length, max_length=5, seed=None):
+    """
+    Output
+    procedural_env_list is going to be a (max_length x num_tasks_per_length) x num_procs list
+    procedural_task_list is going to be a (max_length x num_tasks_per_length) list
+    """
+    np.random.seed(seed)
+    procedural_env_list = []
+    procedural_task_list = []
+    for seq_length in range(1, max_length+1):  # maximum sequence length of 5
+        for count in range(num_tasks_per_length):
+            print("creating tasks of length {}".format(seq_length)) 
+            # create the sequence, subject to some constraints.
+            key_count = 0
+            goal_in_sight = False
+            new_task_sequence = []
+            for i in range(seq_length):
+                # if the key count is positive, then you've got all the options
+                if key_count > 0:
+                    limited_choices = subtasks
+                else:
+                    # exclude consideration
+                    limited_choices = [element for element in subtasks if element.id != 'unlock_correct_door']
+
+                if goal_in_sight:
+                    limited_choices = [element for element in limited_choices if element.id != 'to_room_with_goal']
+                    chosen_subtask = np.random.choice(limited_choices)
+                    goal_in_sight = False  # whatever the choice, you will reset
+                else:
+                    limited_choices = [element for element in limited_choices if element.id != 'move2goal']
+                    chosen_subtask = np.random.choice(limited_choices)
+                    if chosen_subtask.id == 'to_room_with_goal':
+                        goal_in_sight = True
+                if chosen_subtask.id == 'move2key':
+                    key_count += 1
+                elif chosen_subtask.id == 'unlock_correct_door':
+                    key_count -= 1
+                new_task_sequence.append(chosen_subtask)
+            # (to_room_with_goal needs to be accomplished, always immediately before attaining the goal)
+            print(','.join([str(el) for el in new_task_sequence]))
+
+            #new_task_sequence = [to_room_with_goal, move2goal]
+
+            # create num_procs instantiations of this environment
+            this_procedural_env_list = []
+            for proc_idx in range(num_procs):
+                # create the graph of rooms
+                procedural_graph = ProceduralGraph(new_task_sequence, cluster_max_size=2, seed=proc_idx*seed)
+                rowcol, locked, unlocked, hallways = procedural_graph.get_rowcol()
+                connections = {'locked': locked, 'unlocked': unlocked, 'hallways': hallways}
+                # instantiate the room
+                new_prenv = ProceduralEnv(new_task_sequence, connections, rowcol,
+                                        procedural_graph.room2pos, procedural_graph.possessions,
+                                        procedural_graph.starting_point, room_size=6,
+                                        seed=proc_idx*seed)
+                # save into global list
+                this_procedural_env_list.append(new_prenv)
+            procedural_task_list.append(Task('l{}_i{}'.format(seq_length, count), None, SymbolSequence(new_task_sequence)))
+            procedural_env_list.append(this_procedural_env_list)
+
+    return procedural_env_list, procedural_task_list
 
 # Task 1: 4-room senvironment
 # TODO: get the environment
@@ -199,7 +279,7 @@ task4 = Task('unlock', 'MiniGrid-Unlock-v0',
 
 # before, it was the same as the structure of task 5
 
-vocab = SymbVocabulary([move2goal, pickupgoal, move2key, unlockcorrectdoor, to_room_with_goal])
+vocab = SymbVocabulary(subtasks)
 global_taskset = TaskSet([task1, task2, task3, task4], vocab)
 
 task5 = Task('door-key', 'MiniGrid-DoorKey-5x5-v0',
