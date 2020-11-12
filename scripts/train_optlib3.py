@@ -27,6 +27,9 @@ parser.add_argument("--model", default=None,
 parser.add_argument("--pretrained-model", default=None,
                     help="name of the model that's pretrained")
 
+parser.add_argument("--task-loc", default=None,
+                    help="name of the task folder")
+
 parser.add_argument("--seed", type=int, default=1,
                     help="random seed (default: 1)")
 parser.add_argument("--log-interval", type=int, default=1,
@@ -125,7 +128,9 @@ if args.transfer:
 envs = {}  # envs will become a dictionary, where each entry is a list of environment instantiations.
 # environments across different tasks, and random initializations within the same task
 
+# TODO replace this with loading from PICKLE
 task_envs, task_list = tasks.get_procedural_taskenvs(args.procs, 5, max_length=5, seed=args.seed)
+
 task_set = tasks.TaskSet(task_list, tasks.vocab)
 task_setup = tasks.TaskSetup([task_list, None])
 unique_tasks = []
@@ -139,6 +144,10 @@ for idx, task in enumerate(task_list):
     # this will be a list
     unique_tasks.append(task.id)
 assert len(envs) == len(unique_tasks) # Tasks x processes
+
+# TODO: task generation should happen in a separate script. Environment instantiations should be saved as well...
+
+
 
 # Load observations preprocessor
 # NOTE: assuming that all environments have the same observation space
