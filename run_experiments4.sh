@@ -6,6 +6,7 @@ vanilla=false # whether to train vanilla
 generatetask=false # whether to generate tasks
 visualizetasks=false
 transfer=false
+memory=false
 
 # default parameters in general
 numprocs=4
@@ -21,7 +22,7 @@ frames_base="--frames 6400000" # default: 6400000
 frames_transfer="--frames 1600000" # default: 1600000
 
 # colon indicates a parameter that needs an argument
-while getopts m:n:ovstl:r:p:e:x:f flag
+while getopts m:n:ovstl:r:p:e:x:fyc: flag
 do
     case "${flag}" in
         m) modelname=${OPTARG};;
@@ -36,6 +37,8 @@ do
         x) excludeloc=${OPTARG};; # location of tasks to exclude from task generation
         p) numprocs=${OPTARG};; # number of processes
         e) seed=${OPTARG};;
+        y) memory=true;;
+        c) recurrence=${OPTARG};;
     esac
 done
 
@@ -79,6 +82,16 @@ fi
 # training
 command="python3 -m scripts.train_optlib4 --algo a2c --save-interval 10  --procs $numprocs"
 
+if [ "$memory" = true ]; then
+    if [ -n "$recurrence" ]; then
+        command="$command --recurrence $recurrence"
+    else
+        echo "ERROR: recurrence number not provided through -c"
+        exit 1
+    fi
+fi
+
+# command="python3 -m scripts.train_optlib4 --algo a2c --save-interval 10  --procs $numprocs"
 if [ ! "$taskloc" ]; then
     echo "ERROR: no location provided to save tasks environments" 
     exit 1

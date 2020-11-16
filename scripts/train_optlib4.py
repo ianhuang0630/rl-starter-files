@@ -11,7 +11,7 @@ import sys
 from copy import deepcopy
 
 import utils
-from model import ACModel, OpLibModel, OpLibModel
+from model import ACModel, OpLibModel, MemOpLibModel
 
 # for multitask option learning
 import utils.tasks as tasks  # script won't be executed if it's been already loaded
@@ -212,7 +212,10 @@ if args.model_type == 'vanilla':
 elif args.model_type == 'optlib':
     vocab_size = tasks.vocab.size
     taskset_size = task_setup.num_unique_tasks
-    optlibmodel = OpLibModel(obs_space, envs[firstkey][0].action_space, vocab_size, taskset_size)
+    if args.mem:
+        optlibmodel = MemOpLibModel(obs_space, envs[firstkey][0].action_space, vocab_size, taskset_size)
+    else:
+        optlibmodel = OpLibModel(obs_space, envs[firstkey][0].action_space, vocab_size, taskset_size)
 else:
     raise ValueError('Model type invalid')
 
@@ -273,7 +276,7 @@ for idx, task in enumerate(task_set):
 
 tasksampler = tasks.CurriculumTaskSampler(task_list, int(np.ceil(args.frames/algo.num_frames)))
 # loading the task symbols.
-asdf = 0 # for debugging. this number should eventually match 
+asdf = 0  # for debugging. this number should eventually match 
 while num_frames < args.frames: # a2c gives 5 frames a time by default
     # Update model parameters
     update_start_time = time.time()

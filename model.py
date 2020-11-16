@@ -139,6 +139,66 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
         emb = torch.cat((emb, obs.key.unsqueeze(dim=1)), 1)
         return emb
 
+class MemOpLibModel(OpLibModel):
+    recurrent = True
+    def __init__(self, obs_space, action_space, vocab_size, num_tasks,
+                 vocab_embedding_size=3, task_embedding_size=3):
+        super().__init__(obs_space, action_space, vocab_size, num_tasks, vocab_embedding_size, task_embedding_size)
+        self.memory_rnn = nn.LSTMCell(self.effective_embedding_size, self.semi_memory_size)
+
+    @property
+    def memory_size(self):
+        return 2*self.semi_memory_size
+
+    @property
+    def semi_memory_size(self):
+        return self.effective_embedding_size
+
+
+    def forward(self, obs, memory):
+
+        emb = self.get_embedding(obs)
+
+        # using memory, gets
+        hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
+        hidden = self.memory_rnn(emb, hidden)
+
+        emb = hidden[0]
+        memory = torch.cat(hidden, dim=1)
+
+        curr_symb_emb = self.vocab_embedding(obs.curr_symbol)
+        next_symb_emb = self.vocab_embedding(obs.next_symbol)
+        if not self.eval_mode:
+            task_emb = self.task_embedding(obs.task)
+
+        emb_curr_symb = torch.cat((emb, curr_symb_emb), dim=1)
+        emb_next_symb = torch.cat((emb, next_symb_emb), dim=1)
+        if not self.eval_mode:
+            emb_task = torch.cat((emb, task_emb), dim=1)
+
+        prob_out = self.prob_out(emb_curr_symb)
+        bdist = Bernoulli(prob_out)
+        switch = bdist.sample()
+
+        prob_in_curr = self.prob_in(emb_curr_symb)
+        prob_in_next = self.prob_in(emb_next_symb)
+        prob_in = (1-switch)*prob_in_curr + switch*prob_in_next
+        if not self.eval_mode:
+            value = self.critic(emb_task)
+            value = value.squeeze(1)
+        else:
+            value = None
+        policy_curr = self.actor(emb_curr_symb)
+        policy_next = self.actor(emb_next_symb)
+        logits = (1-switch)*policy_curr + switch*policy_next
+        dist = Categorical(logits=F.log_softmax(logits, dim=1))
+
+        prob_in = prob_in.squeeze(1)
+        prob_out = prob_out.squeeze(1)
+
+        return dist, value, switch, prob_out, prob_in, memory
+
+
 
 class BetaModulatedOpLibModel(OpLibModel):
     """
