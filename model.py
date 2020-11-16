@@ -92,7 +92,7 @@ class OpLibModel(nn.Module, torch_ac.OpLibModelBase):
 
         self.eval_mode = False
 
-    def forward(self, obs):
+    def forward(self, obs):  # TODO: add memory as input
 
         emb = self.get_embedding(obs)
         curr_symb_emb = self.vocab_embedding(obs.curr_symbol)

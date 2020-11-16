@@ -22,6 +22,10 @@ class OptLibEnv(gym.Env):
         if switches.item():
             # move the index
             self.symbidx += 1
+            # TODO: check if you've reached the end. If yes, then you're DONE!
+            if self.symbidx == len(self.symbSeq):
+                done = True
+            # the below is for append_symb_task to not freeze up.
             self.symbidx = min(self.symbidx, len(self.symbSeq)-1)
 
         obs = self.append_symb_task(obs)

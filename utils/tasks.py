@@ -1,6 +1,7 @@
 """
 Implementation of a task set
 """
+from abc import abstractmethod
 import numpy as np
 from utils.proc_env import *
 from gym_minigrid.envs import ProceduralEnv
@@ -76,7 +77,6 @@ class TaskSet(object):
     def __str__(self):
         return "\n".join([str(task) for task in self.task_set])
 
-# TODO:
 class Task(object):
     def __init__(self, name, environment, symbol_sequence):
         self.name = name
@@ -191,46 +191,73 @@ class SymbVocabulary(object):
 
 # The following are utility functiosn to create tasks.
 
-def get_procedural_taskenvs(num_procs, num_tasks_per_length, max_length=5,
-                            room_size=6, max_cluster_size=2, seed=None):
+def get_procedural_taskenvs(num_procs, num_tasks_per_length, min_length=1, max_length=5,
+                            room_size=6, max_cluster_size=2, seed=None, exclude=None):
     """
     Output
     procedural_env_list is going to be a (max_length x num_tasks_per_length) x num_procs list
     procedural_task_list is going to be a (max_length x num_tasks_per_length) list
     """
+
+    # Exclusions below
+    if exclude is not None:
+        exclude_set = set([])
+        for task in exclude:
+            exclude_set.add(tuple([subtask for subtask in task]))
+
+    def reject(candidate_seq):
+        cand_tup = tuple([subtask.id for subtask in candidate_seq])
+        if exclude is None:
+            return False
+        else:
+            # exclude is a list of task id's
+            return cand_tup in exclude_set
+    max_tries = 100
+
     if seed is not None:
         np.random.seed(seed)
     procedural_env_list = []
     procedural_task_list = []
-    for seq_length in range(1, max_length+1):  # maximum sequence length of 5
+    for seq_length in range(min_length, max_length+1):  # maximum sequence length of 5
         for count in range(num_tasks_per_length):
-            print("creating tasks of length {}".format(seq_length)) 
+            print("creating tasks of length {}".format(seq_length))
             # create the sequence, subject to some constraints.
-            key_count = 0
-            goal_in_sight = False
-            new_task_sequence = []
-            for i in range(seq_length):
-                # if the key count is positive, then you've got all the options
-                if key_count > 0:
-                    limited_choices = subtasks
-                else:
-                    # exclude consideration
-                    limited_choices = [element for element in subtasks if element.id != 'unlock_correct_door']
 
-                if goal_in_sight:
-                    limited_choices = [element for element in limited_choices if element.id != 'to_room_with_goal']
-                    chosen_subtask = np.random.choice(limited_choices)
-                    goal_in_sight = False  # whatever the choice, you will reset
-                else:
-                    limited_choices = [element for element in limited_choices if element.id != 'move2goal']
-                    chosen_subtask = np.random.choice(limited_choices)
-                    if chosen_subtask.id == 'to_room_with_goal':
-                        goal_in_sight = True
-                if chosen_subtask.id == 'move2key':
-                    key_count += 1
-                elif chosen_subtask.id == 'unlock_correct_door':
-                    key_count -= 1
-                new_task_sequence.append(chosen_subtask)
+            try_num = 0
+            while True:
+                try_num += 1
+                key_count = 0
+                goal_in_sight = False
+                new_task_sequence = []
+                for i in range(seq_length):
+                    # if the key count is positive, then you've got all the options
+                    if key_count > 0:
+                        limited_choices = subtasks
+                    else:
+                        # exclude consideration
+                        limited_choices = [element for element in subtasks if element.id != 'unlock_correct_door']
+
+                    if goal_in_sight:
+                        limited_choices = [element for element in limited_choices if element.id != 'to_room_with_goal']
+                        chosen_subtask = np.random.choice(limited_choices)
+                        goal_in_sight = False  # whatever the choice, you will reset
+                    else:
+                        limited_choices = [element for element in limited_choices if element.id != 'move2goal']
+                        chosen_subtask = np.random.choice(limited_choices)
+                        if chosen_subtask.id == 'to_room_with_goal':
+                            goal_in_sight = True
+                    if chosen_subtask.id == 'move2key':
+                        key_count += 1
+                    elif chosen_subtask.id == 'unlock_correct_door':
+                        key_count -= 1
+                    new_task_sequence.append(chosen_subtask)
+
+                if not reject(new_task_sequence):
+                    break # otherwise, continue on, regenerate one
+
+                print('A collision was detected with a task sequence in the exclude list. Regenerating.')
+                if try_num >= max_tries:
+                    raise ValueError('Failed to make a new sequence in the given number of tries.')
 
             print(','.join([str(el) for el in new_task_sequence]))
 
@@ -301,6 +328,70 @@ def get_task(task_id):
 
 def get_subtask_id(task, subtask_encoding):
     return task.symbol_vocab.decode(subtask_encoding).id
+
+class TaskSampler(object):
+    def __init__(self, tasks):
+        """
+        Args:
+        tasks: a list of task objects.
+        """
+        self.idx = 0
+        self.tasks = tasks
+
+    @abstractmethod
+    def next_sample(self):
+        pass
+
+    def reset(self):
+        self.idx = 0
+
+class RandomTaskSampler(TaskSampler):
+    def __init__(self, tasks):
+        super().__init__(tasks)
+        self.task_ids = [task.id for task in self.tasks]
+
+    def next_sample(self):
+        # choosing random
+        chosen_task = np.random.choice(self.task_ids)
+        self.idx += 1
+        return chosen_task
+
+class CurriculumTaskSampler(TaskSampler):
+    def __init__(self, tasks, num_updates):
+        super().__init__(tasks)
+
+        # arrange them in terms of length
+        self.num_frames = num_updates
+        self.length2tasks = {}
+        for task in tasks:
+            # analyze task.id: this contains all the length information
+            assert 'l' in task.id.split('_')[0]
+            tmp = task.id.split('_')[0]
+            idx = len(tmp) - 1 - tmp[::-1].find('l')
+            tasklength = int(tmp[idx+1:])
+
+            if tasklength in self.length2tasks:
+                self.length2tasks[tasklength].append(task.id)
+            else:
+                self.length2tasks[tasklength] = [task.id]
+        self.lengths = sorted(list(self.length2tasks.keys()))
+
+        # assuming equal length distribution
+        lowerbound = int(self.num_frames/len(self.lengths))
+        self.limitperlength = [lowerbound * (i+1) for i in range(len(self.lengths))]
+        self.limitperlength[-1] = num_updates
+        self.length_idx = 0
+
+    def next_sample(self):
+        # choosing based on length
+        if self.idx >= self.limitperlength[self.length_idx]:
+            # move onto the next length
+            self.length_idx += 1
+
+        chosen_task = np.random.choice(self.length2tasks[self.lengths[self.length_idx]])
+        self.idx += 1
+
+        return chosen_task
 
 # NOTE: the following will run every time the script is loaded
 

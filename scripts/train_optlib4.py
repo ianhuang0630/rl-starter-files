@@ -8,6 +8,7 @@ import torch
 import torch_ac
 import tensorboardX
 import sys
+from copy import deepcopy
 
 import utils
 from model import ACModel, OpLibModel, OpLibModel
@@ -31,11 +32,11 @@ parser.add_argument("--pretrained-model", default=None,
                     help="name of the model that's pretrained")
 parser.add_argument("--task-loc", required=True,
                     help="name of the folder under task_envs/ that has all the task and environment information")
-
 parser.add_argument("--seed", type=int, default=1,
                     help="random seed (default: 1)")
 
-
+parser.add_argument("--transfer-task-loc", default=None,
+                    help="folder for the transfer")
 
 parser.add_argument("--log-interval", type=int, default=1,
                     help="number of updates between two logs (default: 1)")
@@ -113,7 +114,12 @@ utils.seed(args.seed)
 
 # Set device
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+num_gpus = torch.cuda.device_count()
+if num_gpus:
+    device = torch.device("cuda:{}".format(num_gpus-1))
+else:
+    device = torch.device("cpu")
+
 txt_logger.info(f"Device: {device}\n")
 
 txt_logger.info("Environments loaded\n")
@@ -133,8 +139,6 @@ if args.transfer:
 envs = {}  # envs will become a dictionary, where each entry is a list of environment instantiations.
 # environments across different tasks, and random initializations within the same task
 
-# TODO replace this with loading from PICKLE
-
 assert os.path.exists(os.path.join('task_envs', args.task_loc))
 taskenv_path = os.path.join('task_envs', args.task_loc)
 with open(os.path.join(taskenv_path, 'meta.json'), 'r') as f:
@@ -142,26 +146,50 @@ with open(os.path.join(taskenv_path, 'meta.json'), 'r') as f:
 with open(os.path.join(taskenv_path, 'taskenv.pkl'), 'rb') as f:
     task_env = pickle.load(f)
 
-task_envs, task_list = [], []
-
+# processing the base task set
+base_task_envs, base_task_list = [], []
 for key in task_env:
     taskenv_tup = task_env[key]
     assert isinstance(taskenv_tup[0], tasks.Task)
     assert isinstance(taskenv_tup[1], list)
-    task_list.append(taskenv_tup[0])
-    task_envs.append(taskenv_tup[1])
+    base_task_list.append(taskenv_tup[0])
+    base_task_envs.append(taskenv_tup[1])
 
-task_set = tasks.TaskSet(task_list, tasks.vocab)
-task_setup = tasks.TaskSetup([task_list, None])
-unique_tasks = []
+base_task_set = tasks.TaskSet(base_task_list, tasks.vocab)
+
+# processing the transfer dataset
+transfer_task_set, transfer_task_envs, transfer_task_list = None, None, None
+if args.transfer_task_loc is not None:
+    transfer_taskenv_path = os.path.join('task_envs', args.transfer_task_loc)
+    with open(os.path.join(transfer_taskenv_path, 'meta.json'), 'r') as f:
+        transfer_meta = json.load(f)
+    with open(os.path.join(transfer_taskenv_path, 'taskenv.pkl'), 'rb') as f:
+        transfer_task_env = pickle.load(f)
+
+    transfer_task_envs, transfer_task_list = [], []
+    for key in transfer_task_env:
+        taskenv_tup = transfer_task_env[key]
+        assert isinstance(taskenv_tup[0], tasks.Task)
+        # TODO: edit ID?
+        modified_task = deepcopy(taskenv_tup[0])
+        modified_task.name = 'transfer-' + modified_task.id  # to avoid id collision problems down the line
+        assert isinstance(taskenv_tup[1], list)
+        transfer_task_list.append(modified_task)
+        transfer_task_envs.append(taskenv_tup[1])
+
+    transfer_task_set = tasks.TaskSet(transfer_task_list, tasks.vocab)
+
+task_setup = tasks.TaskSetup([base_task_list, transfer_task_list])
+# decide task_set and task_envs based on transfer/or not
+task_set = transfer_task_set if args.transfer else base_task_set
+task_list = transfer_task_list if args.transfer else base_task_list
+task_envs = transfer_task_envs if args.transfer else base_task_envs
+
 for idx, task in enumerate(task_list):
     # envs.append(utils.make_env(args.env, args.seed + 10000 * i))
     envs[task.id] = [utils.make_env(instance,
                                     optlib = args.model_type == 'optlib',
                                     task=task) for instance in task_envs[idx]]
-    # this will be a list
-    unique_tasks.append(task.id)
-assert len(envs) == len(unique_tasks)  # Tasks x processes
 
 # Load observations preprocessor
 # NOTE: assuming that all environments have the same observation space
@@ -183,7 +211,7 @@ if args.model_type == 'vanilla':
     optlibmodel = ACModel(obs_space, envs[firstkey][0].action_space, args.mem, args.text)
 elif args.model_type == 'optlib':
     vocab_size = tasks.vocab.size
-    taskset_size = len(unique_tasks)
+    taskset_size = task_setup.num_unique_tasks
     optlibmodel = OpLibModel(obs_space, envs[firstkey][0].action_space, vocab_size, taskset_size)
 else:
     raise ValueError('Model type invalid')
@@ -243,13 +271,17 @@ for idx, task in enumerate(task_set):
 
     txt_logger.info('TASK: {}\n'.format(task))
 
+tasksampler = tasks.CurriculumTaskSampler(task_list, int(np.ceil(args.frames/algo.num_frames)))
 # loading the task symbols.
+asdf = 0 # for debugging. this number should eventually match 
 while num_frames < args.frames: # a2c gives 5 frames a time by default
     # Update model parameters
     update_start_time = time.time()
+    asdf += 1
 
     # sample task from the task distribution
-    sample_task_id = np.random.choice(list(task2algo.keys()))
+    # sample_task_id = np.random.choice(list(task2algo.keys()))
+    sample_task_id = tasksampler.next_sample()
     algo = task2algo[sample_task_id]
 
     # experiences should also include switch decisions.
@@ -315,3 +347,4 @@ while num_frames < args.frames: # a2c gives 5 frames a time by default
         utils.save_status(status, model_dir)
         txt_logger.info("Status saved")
 
+print('groundtruth: {} calculated: {}'.format(asdf, int(np.ceil(args.frames/algo.num_frames))))
