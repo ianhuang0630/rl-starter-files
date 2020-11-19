@@ -18,6 +18,8 @@ taskseqperlen=5
 taskmaxlen=5
 taskroomsize=6
 
+numframesperproc=32
+
 frames_base="--frames 6400000" # default: 6400000
 frames_transfer="--frames 1600000" # default: 1600000
 
@@ -80,7 +82,7 @@ if [ "$visualizetasks" = true ]; then
 fi
 
 # training
-command="python3 -m scripts.train_optlib4 --algo a2c --save-interval 10  --procs $numprocs"
+command="python3 -m scripts.train_optlib4 --algo a2c --save-interval 10  --procs $numprocs --frames-per-proc $numframesperproc"
 
 if [ "$memory" = true ]; then
     if [ -n "$recurrence" ]; then
