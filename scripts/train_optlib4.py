@@ -79,7 +79,8 @@ parser.add_argument("--text", action="store_true", default=False,
 
 parser.add_argument("--transfer", action="store_true", default=False,
                     help="switch to transfer tasks, starting from the model parameters pointed to by `--model`.")
-
+parser.add_argument("--random-curriculum", action="store_true", default=False,
+                    help="If the curriculum should be random sampling of tasks")
 args = parser.parse_args()
 
 if args.transfer:
@@ -274,7 +275,11 @@ for idx, task in enumerate(task_set):
 
     txt_logger.info('TASK: {}\n'.format(task))
 
-tasksampler = tasks.CurriculumTaskSampler(task_list, int(np.ceil(args.frames/algo.num_frames)))
+if args.random_curriculum:
+    tasksampler = tasks.RandomTaskSampler(task_list)
+else:
+    tasksampler = tasks.CurriculumTaskSampler(task_list, int(np.ceil(args.frames/algo.num_frames)))
+
 # loading the task symbols.
 asdf = 0  # for debugging. this number should eventually match 
 while num_frames < args.frames: # a2c gives 5 frames a time by default
@@ -311,19 +316,19 @@ while num_frames < args.frames: # a2c gives 5 frames a time by default
         data += rreturn_per_episode.values()
         header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
         data += num_frames_per_episode.values()
-        header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
-        data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
+        header += ["entropy", "value", "policy_loss", "value_loss", "terminal_loss", "alignment_loss", "grad_norm"]
+        data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["terminal_loss"], logs["alignment_loss"], logs["grad_norm"]]
 
         # heading switch statistics
         total_switches_per_process = np.sum(logs['switches'], axis=0, dtype=np.int).tolist()
 
         beta_value = None
         if beta_value is None:
-            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | C {}".format(*data, total_switches_per_process)
+            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | tL {:.3f} | aL {:.3f} | ∇ {:.3f} | C {}".format(*data, total_switches_per_process)
         else:
             header += ['beta']
             data += [beta_value]
-            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f} | B {} | C {}".format(*data, total_switches_per_process)
+            infoline = "T {} | U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | tL {:.3f} | aL {:.3f} | ∇ {:.3f} | B {} | C {}".format(*data, total_switches_per_process)
 
         txt_logger.info(infoline)
 

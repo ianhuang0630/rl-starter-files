@@ -7,6 +7,7 @@ generatetask=false # whether to generate tasks
 visualizetasks=false
 transfer=false
 memory=false
+randomcurriculum=false
 
 # default parameters in general
 numprocs=4
@@ -24,7 +25,7 @@ frames_base="--frames 6400000" # default: 6400000
 frames_transfer="--frames 1600000" # default: 1600000
 
 # colon indicates a parameter that needs an argument
-while getopts m:n:ovstl:r:p:e:x:fyc: flag
+while getopts m:n:ovstl:r:p:e:x:fyc:d flag
 do
     case "${flag}" in
         m) modelname=${OPTARG};;
@@ -41,6 +42,7 @@ do
         e) seed=${OPTARG};;
         y) memory=true;;
         c) recurrence=${OPTARG};;
+        d) randomcurriculum=true;;
     esac
 done
 
@@ -93,6 +95,10 @@ if [ "$memory" = true ]; then
     fi
 fi
 
+if [ "$randomcurriculum" = true ]; then
+    command="$command --random-curriculum"
+fi
+
 # command="python3 -m scripts.train_optlib4 --algo a2c --save-interval 10  --procs $numprocs"
 if [ ! "$taskloc" ]; then
     echo "ERROR: no location provided to save tasks environments" 
@@ -116,7 +122,6 @@ if [ "$transfer" = true ]; then
     echo "adding transfer task location"
     command="$command --transfer-task-loc $transfertaskloc"
 fi
-
 
 # NOTE: using the above arguments, it should be able to register all the tasks (transfer and base).
 if [ "$optlib" = true ]; then
@@ -235,7 +240,7 @@ if [ "$transfer" = true ] && [ "$vanilla" = true ]; then
     eval "$vanillacommand"
 
     # copying task information
-    echo "Copying task information to folder"
+    echo "Copying task information to folder
     cp -rf "task_envs/$transfertaskloc" "storage/transfer-$vanillaname/" || exit 1
     echo "Done"
 fi

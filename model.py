@@ -15,7 +15,6 @@ def init_params(m):
         if m.bias is not None:
             m.bias.data.fill_(0)
 
-
 # a new type of model, OpLibModel(ACModel)
 #####
 

@@ -107,6 +107,8 @@ if len(args.subtasks) == 0:
 else:
     env, task = tasks.get_taskenvs_from_strs(args.subtasks)
 
+# TODO loading from pkl?
+
 if args.agent_view:
     env = RGBImgPartialObsWrapper(env)
     env = ImgObsWrapper(env)

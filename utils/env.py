@@ -17,12 +17,16 @@ class OptLibEnv(gym.Env):
         to next symbol
         """
         # symbidx
+
+        # TODO: if actions is none, switches must be true (1), which means no reweards, and the obs remains unchanged, done remains undone, info can be None.
+        # TODO: otherwise, proceed.
+
         obs, reward, done, info = self.env.step(actions)
         # check what the action says -- should we increment the symbidx?
         if switches.item():
             # move the index
             self.symbidx += 1
-            # TODO: check if you've reached the end. If yes, then you're DONE!
+            # check if you've reached the end. If yes, then you're DONE!
             if self.symbidx == len(self.symbSeq):
                 done = True
             # the below is for append_symb_task to not freeze up.
